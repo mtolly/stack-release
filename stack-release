@@ -1,0 +1,61 @@
+#!/usr/bin/env ruby
+
+require 'yaml'
+require 'fileutils'
+
+def sys(*args)
+  STDERR.puts "> #{args.join(' ')}"
+  result = system(*args)
+  unless result
+    STDERR.puts "#{$0}: command returned #{$?.exitstatus}"
+    exit 1
+  end
+end
+
+yml = YAML.load File.open 'stack.yaml'
+version = `cabal info .`.match(/\A\*\s+[\w-]+-([\d\.]+)\s+/) do |md|
+  md[1]
+end or throw "#{$0}: couldn't parse cabal info"
+
+unless ARGV.length == 2
+  STDERR.puts "Usage: #{$0} [windows|mac|linux] [executable name]"
+  exit 1
+end
+
+# http://stackoverflow.com/a/171011
+module OS
+  def OS.windows?
+    (/cygwin|mswin|mingw|bccwin|wince|emx/ =~ RUBY_PLATFORM) != nil
+  end
+
+  def OS.mac?
+   (/darwin/ =~ RUBY_PLATFORM) != nil
+  end
+
+  def OS.unix?
+    !OS.windows?
+  end
+
+  def OS.linux?
+    OS.unix? and not OS.mac?
+  end
+end
+
+if OS.mac? && ARGV[0] == 'mac'
+  exe = ARGV[1]
+  FileUtils.rm_rf '.stack-work/release/mac'
+  sys "stack build #{exe}"
+  FileUtils.mkdir_p '.stack-work/release/mac'
+  FileUtils.cp `stack exec which #{exe}`.chomp, '.stack-work/release/mac'
+  sys "dylibbundler -cd -of -b -x .stack-work/release/mac/#{exe} -d .stack-work/release/mac -p '@executable_path'"
+  sys "cp README* .stack-work/release/mac"
+  sys "strip .stack-work/release/mac/#{exe}"
+  FileUtils.cd '.stack-work/release/mac' do
+    STDERR.puts "> (cd .stack-work/release/mac"
+    sys "zip ../#{exe}-v#{version}-mac.zip ./*"
+    STDERR.puts "> )"
+  end
+else
+  STDERR.puts "#{$0}: unsupported platform combination"
+  exit 1
+end
