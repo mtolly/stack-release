@@ -12,15 +12,26 @@ def sys(*args)
   end
 end
 
+def cd(dir, &blk)
+  FileUtils.cd(dir) do
+    STDERR.puts "> (cd #{dir}"
+    blk.call()
+    STDERR.puts "> )"
+  end
+end
+
 yml = YAML.load File.open 'stack.yaml'
 version = `cabal info .`.match(/\A\*\s+[\w-]+-([\d\.]+)\s+/) do |md|
   md[1]
 end or throw "#{$0}: couldn't parse cabal info"
 
 unless ARGV.length == 2
-  STDERR.puts "Usage: #{$0} [windows|mac|linux] [executable name]"
+  STDERR.puts "Usage: #{$0} [platform] [executable name]"
+  STDERR.puts "Platforms: windows, mac, mac-app, linux"
   exit 1
 end
+platform = ARGV[0]
+exe      = ARGV[1]
 
 # http://stackoverflow.com/a/171011
 module OS
@@ -41,19 +52,41 @@ module OS
   end
 end
 
-if OS.mac? && ARGV[0] == 'mac'
-  exe = ARGV[1]
+if OS.mac? && platform == 'mac'
   FileUtils.rm_rf '.stack-work/release/mac'
   sys "stack build #{exe}"
   FileUtils.mkdir_p '.stack-work/release/mac'
   FileUtils.cp `stack exec which #{exe}`.chomp, '.stack-work/release/mac'
-  sys "dylibbundler -cd -of -b -x .stack-work/release/mac/#{exe} -d .stack-work/release/mac -p '@executable_path'"
-  sys "cp README* .stack-work/release/mac"
   sys "strip .stack-work/release/mac/#{exe}"
-  FileUtils.cd '.stack-work/release/mac' do
-    STDERR.puts "> (cd .stack-work/release/mac"
-    sys "zip ../#{exe}-v#{version}-mac.zip ./*"
-    STDERR.puts "> )"
+  sys "dylibbundler -cd -of -b -x .stack-work/release/mac/#{exe} -d .stack-work/release/mac -p '@executable_path'"
+  # sys "cp README* .stack-work/release/mac"
+  cd '.stack-work/release/mac' do
+    sys "zip -r ../#{exe}-v#{version}-mac.zip ./*"
+  end
+elsif OS.mac? && platform == 'mac-app'
+  FileUtils.rm_rf '.stack-work/release/mac-app'
+  sys "stack build #{exe}"
+  contents = ".stack-work/release/mac-app/#{exe}.app/Contents"
+  FileUtils.mkdir_p "#{contents}/MacOS"
+  FileUtils.mkdir_p "#{contents}/libs"
+  FileUtils.cp `stack exec which #{exe}`.chomp, "#{contents}/MacOS"
+  sys "strip #{contents}/MacOS/#{exe}"
+  sys "dylibbundler -cd -of -b -x #{contents}/MacOS/#{exe} -d #{contents}/libs -p '@executable_path/../libs'"
+  # sys "cp README* .stack-work/release/mac-app"
+  File.open("#{contents}/Info.plist", 'w') do |f|
+    f.puts <<-EOS
+      <plist version="1.0">
+      <dict>
+        <key>CFBundleExecutable</key>
+        <string>#{exe}</string>
+        <key>CFBundleName</key>
+        <string>#{exe}</string>
+      </dict>
+      </plist>
+    EOS
+  end
+  cd '.stack-work/release/mac-app' do
+    sys "zip -r ../#{exe}-v#{version}-mac-app.zip ./*"
   end
 else
   STDERR.puts "#{$0}: unsupported platform combination"
