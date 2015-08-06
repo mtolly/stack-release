@@ -52,27 +52,32 @@ module OS
   end
 end
 
+extra = Dir['README*', 'LICENSE*', 'COPYING*']
+
 if OS.mac? && platform == 'mac'
+
   FileUtils.rm_rf '.stack-work/release/mac'
-  sys "stack build #{exe}"
+  sys "stack build"
   FileUtils.mkdir_p '.stack-work/release/mac'
   FileUtils.cp `stack exec which #{exe}`.chomp, '.stack-work/release/mac'
   sys "strip .stack-work/release/mac/#{exe}"
   sys "dylibbundler -cd -of -b -x .stack-work/release/mac/#{exe} -d .stack-work/release/mac -p '@executable_path'"
-  # sys "cp README* .stack-work/release/mac"
+  extra.each { |f| FileUtils.cp(f, '.stack-work/release/mac') }
   cd '.stack-work/release/mac' do
     sys "zip -r ../#{exe}-v#{version}-mac.zip ./*"
   end
+
 elsif OS.mac? && platform == 'mac-app'
+
   FileUtils.rm_rf '.stack-work/release/mac-app'
-  sys "stack build #{exe}"
+  sys "stack build"
   contents = ".stack-work/release/mac-app/#{exe}.app/Contents"
   FileUtils.mkdir_p "#{contents}/MacOS"
   FileUtils.mkdir_p "#{contents}/libs"
   FileUtils.cp `stack exec which #{exe}`.chomp, "#{contents}/MacOS"
   sys "strip #{contents}/MacOS/#{exe}"
   sys "dylibbundler -cd -of -b -x #{contents}/MacOS/#{exe} -d #{contents}/libs -p '@executable_path/../libs'"
-  # sys "cp README* .stack-work/release/mac-app"
+  extra.each { |f| FileUtils.cp(f, '.stack-work/release/mac') }
   File.open("#{contents}/Info.plist", 'w') do |f|
     f.puts <<-EOS
       <plist version="1.0">
@@ -88,7 +93,10 @@ elsif OS.mac? && platform == 'mac-app'
   cd '.stack-work/release/mac-app' do
     sys "zip -r ../#{exe}-v#{version}-mac-app.zip ./*"
   end
+
 else
+
   STDERR.puts "#{$0}: unsupported platform combination"
   exit 1
+
 end
