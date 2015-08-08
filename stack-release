@@ -51,21 +51,22 @@ module OS
   end
 end
 
+outdir = ".stack-work/release/#{platform}"
+FileUtils.rm_rf outdir
+FileUtils.mkdir_p outdir
+extra = Dir['README*', 'LICENSE*', 'COPYING*']
+extra.each { |f| FileUtils.cp f, outdir }
+
 if OS.mac? && platform == 'mac'
 
-  outdir = '.stack-work/release/mac'
-  FileUtils.rm_rf outdir
   sys "stack setup"
   sys "stack build"
-  FileUtils.mkdir_p outdir
   FileUtils.cp `stack exec which #{exe}`.chomp, outdir
   sys "strip .stack-work/release/mac/#{exe}"
   sys "dylibbundler -cd -of -b -x #{outdir}/#{exe} -d #{outdir} -p '@executable_path'"
 
 elsif OS.mac? && platform == 'mac-app'
 
-  outdir = '.stack-work/release/mac-app'
-  FileUtils.rm_rf outdir
   sys "stack setup"
   sys "stack build"
   contents = "#{outdir}/#{exe}.app/Contents"
@@ -89,19 +90,17 @@ elsif OS.mac? && platform == 'mac-app'
 
 elsif OS.unix? && platform == 'windows'
 
-  outdir = '.stack-work/release/windows'
-  FileUtils.rm_rf outdir
-  FileUtils.mkdir_p outdir
-  ENV['WINEPREFIX'] = "#{Dir.pwd}/.stack-work/release/wine"
+  wineprefix = "#{ENV['HOME']}/.stack/wineprefix"
+  ENV['WINEPREFIX'] = wineprefix
   ENV['WINEDEBUG'] = 'fixme-all'
   sys 'wine wineboot'
   begin
     sys 'wine stack --version'
   rescue
-    sys 'wget https://github.com/commercialhaskell/stack/releases/download/v0.1.1.0/stack-0.1.1.0-i386-windows.zip -O stack.zip'
+    sys 'wget https://github.com/commercialhaskell/stack/releases/download/v0.1.2.0/stack-0.1.2.0-i386-windows.zip -O stack.zip'
     sys 'unzip stack.zip'
     FileUtils.rm 'stack.zip'
-    FileUtils.mv 'stack.exe', "#{ENV['WINEPREFIX']}/drive_c/windows/system32/stack.exe"
+    FileUtils.mv 'stack-0.1.2.0-i386-windows.exe', "#{wineprefix}/drive_c/windows/system32/stack.exe"
   end
   sys 'wine stack setup'
   sys 'wine stack build'
@@ -112,8 +111,7 @@ else
   exit 1
 end
 
-extra = Dir['README*', 'LICENSE*', 'COPYING*']
-extra.each { |f| FileUtils.cp f, outdir }
 cd outdir do
   sys "zip -r ../#{exe}-v#{version}-#{platform}.zip ./*"
 end
+puts "Created .stack-work/release/#{exe}-v#{version}-#{platform}.zip"
