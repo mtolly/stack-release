@@ -7,8 +7,7 @@ def sys(*args)
   STDERR.puts "> #{args.join(' ')}"
   result = system(*args)
   unless result
-    STDERR.puts "#{$0}: command returned #{$?.exitstatus}"
-    exit 1
+    raise IOError.new "command returned #{$?.exitstatus}"
   end
 end
 
@@ -23,7 +22,7 @@ end
 yml = YAML.load File.open 'stack.yaml'
 version = `cabal info .`.match(/\A\*\s+[\w-]+-([\d\.]+)\s+/) do |md|
   md[1]
-end or throw "#{$0}: couldn't parse cabal info"
+end or raise IOError.new "#{$0}: couldn't parse cabal info"
 
 unless ARGV.length == 2
   STDERR.puts "Usage: #{$0} [platform] [executable name]"
@@ -52,34 +51,31 @@ module OS
   end
 end
 
-extra = Dir['README*', 'LICENSE*', 'COPYING*']
-
 if OS.mac? && platform == 'mac'
 
-  FileUtils.rm_rf '.stack-work/release/mac'
+  outdir = '.stack-work/release/mac'
+  FileUtils.rm_rf outdir
+  sys "stack setup"
   sys "stack build"
-  FileUtils.mkdir_p '.stack-work/release/mac'
-  FileUtils.cp `stack exec which #{exe}`.chomp, '.stack-work/release/mac'
+  FileUtils.mkdir_p outdir
+  FileUtils.cp `stack exec which #{exe}`.chomp, outdir
   sys "strip .stack-work/release/mac/#{exe}"
-  sys "dylibbundler -cd -of -b -x .stack-work/release/mac/#{exe} -d .stack-work/release/mac -p '@executable_path'"
-  extra.each { |f| FileUtils.cp(f, '.stack-work/release/mac') }
-  cd '.stack-work/release/mac' do
-    sys "zip -r ../#{exe}-v#{version}-mac.zip ./*"
-  end
+  sys "dylibbundler -cd -of -b -x #{outdir}/#{exe} -d #{outdir} -p '@executable_path'"
 
 elsif OS.mac? && platform == 'mac-app'
 
-  FileUtils.rm_rf '.stack-work/release/mac-app'
+  outdir = '.stack-work/release/mac-app'
+  FileUtils.rm_rf outdir
+  sys "stack setup"
   sys "stack build"
-  contents = ".stack-work/release/mac-app/#{exe}.app/Contents"
+  contents = "#{outdir}/#{exe}.app/Contents"
   FileUtils.mkdir_p "#{contents}/MacOS"
   FileUtils.mkdir_p "#{contents}/libs"
   FileUtils.cp `stack exec which #{exe}`.chomp, "#{contents}/MacOS"
   sys "strip #{contents}/MacOS/#{exe}"
   sys "dylibbundler -cd -of -b -x #{contents}/MacOS/#{exe} -d #{contents}/libs -p '@executable_path/../libs'"
-  extra.each { |f| FileUtils.cp(f, '.stack-work/release/mac') }
   File.open("#{contents}/Info.plist", 'w') do |f|
-    f.puts <<-EOS
+    f.puts <<-XML
       <plist version="1.0">
       <dict>
         <key>CFBundleExecutable</key>
@@ -88,15 +84,36 @@ elsif OS.mac? && platform == 'mac-app'
         <string>#{exe}</string>
       </dict>
       </plist>
-    EOS
+    XML
   end
-  cd '.stack-work/release/mac-app' do
-    sys "zip -r ../#{exe}-v#{version}-mac-app.zip ./*"
+
+elsif OS.unix? && platform == 'windows'
+
+  outdir = '.stack-work/release/windows'
+  FileUtils.rm_rf outdir
+  FileUtils.mkdir_p outdir
+  ENV['WINEPREFIX'] = "#{Dir.pwd}/.stack-work/release/wine"
+  ENV['WINEDEBUG'] = 'fixme-all'
+  sys 'wine wineboot'
+  begin
+    sys 'wine stack --version'
+  rescue
+    sys 'wget https://github.com/commercialhaskell/stack/releases/download/v0.1.1.0/stack-0.1.1.0-i386-windows.zip -O stack.zip'
+    sys 'unzip stack.zip'
+    FileUtils.rm 'stack.zip'
+    FileUtils.mv 'stack.exe', "#{ENV['WINEPREFIX']}/drive_c/windows/system32/stack.exe"
   end
+  sys 'wine stack setup'
+  sys 'wine stack build'
+  FileUtils.cp Dir[".stack-work/install/i386-windows/*/*/bin/#{exe}.exe"][0], outdir
 
 else
-
   STDERR.puts "#{$0}: unsupported platform combination"
   exit 1
+end
 
+extra = Dir['README*', 'LICENSE*', 'COPYING*']
+extra.each { |f| FileUtils.cp f, outdir }
+cd outdir do
+  sys "zip -r ../#{exe}-v#{version}-#{platform}.zip ./*"
 end
