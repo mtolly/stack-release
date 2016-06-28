@@ -2,6 +2,7 @@
 
 require 'yaml'
 require 'fileutils'
+require 'csv'
 
 def sys(*args)
   STDERR.puts "> #{args.join(' ')}"
@@ -90,7 +91,7 @@ elsif OS.mac? && platform == 'mac-app'
 
 elsif OS.unix? && platform == 'windows'
 
-  wineprefix = "#{ENV['HOME']}/.stack/wineprefix"
+  wineprefix = "#{Dir.home}/.stack/wineprefix"
   ENV['WINEPREFIX'] = wineprefix
   ENV['WINEDEBUG'] = 'fixme-all'
   sys 'wine wineboot'
@@ -105,6 +106,24 @@ elsif OS.unix? && platform == 'windows'
   sys 'wine stack setup'
   sys 'wine stack build'
   FileUtils.cp Dir[".stack-work/install/i386-windows/*/*/bin/#{exe}.exe"][0], outdir
+
+  def depends(mod)
+    sys "wine depends.exe /c /oc:depends.csv #{mod}"
+    csv = CSV.read 'depends.csv', headers: true
+    FileUtils.rm 'depends.csv'
+    csv
+  end
+
+  begin
+    depends "#{outdir}/#{exe}.exe"
+  rescue
+    sys 'wget http://www.dependencywalker.com/depends22_x86.zip -O depends.zip'
+    sys 'unzip depends.zip'
+    FileUtils.rm 'depends.zip'
+    %w{exe chm dll}.each { |ext| FileUtils.mv "depends.#{ext}", "#{wineprefix}/drive_c/windows/system32" }
+  end
+
+  modules = depends("#{outdir}/#{exe}.exe").map { |ln| ln['Module'] }
 
 else
   STDERR.puts "#{$0}: unsupported platform combination"
